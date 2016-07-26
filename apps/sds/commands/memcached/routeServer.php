@@ -261,9 +261,11 @@ class routeServer
         $socket = new reactSocketServer($loop);
 
         $socket->on('connection', function (Stream $clientStream) use ($connector) {
-            $clientStream->pause();
+            if(!$this->roMemcachedStream || !$this->rwMemcachedStream) {
+                $clientStream->pause();
+            }
 
-            if(!$this->roMemcachedStream || !$this->roMemcachedStream->isWritable()) {
+            if(!$this->roMemcachedStream) {
                 /** @var \React\Promise\FulfilledPromise|\React\Promise\Promise|\React\Promise\RejectedPromise $connection */
                 $connection = $connector->create($this->oldServer['host'], $this->oldServer['port']);
                 $connection->then(function (Stream $memcachedStream) use ($clientStream) {
@@ -274,7 +276,7 @@ class routeServer
                 });
             }
 
-            if(!$this->rwMemcachedStream || !$this->rwMemcachedStream->isWritable()) {
+            if(!$this->rwMemcachedStream) {
                 /** @var \React\Promise\FulfilledPromise|\React\Promise\Promise|\React\Promise\RejectedPromise $connection */
                 $connection = $connector->create($this->newServer['host'], $this->newServer['port']);
                 $connection->then(function (Stream $memcachedStream) use ($clientStream) {
