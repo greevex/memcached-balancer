@@ -258,21 +258,25 @@ class routeServer
 
         $connector = new Connector($loop, $this->getDns($loop));
 
-        /** @var \React\Promise\FulfilledPromise|\React\Promise\Promise|\React\Promise\RejectedPromise $connection */
-        $connection = $connector->create($this->oldServer['host'], $this->oldServer['port']);
-        $connection->then(function(Stream $memcachedStream) {
-            $this->roMemcachedStream = $memcachedStream;
-        });
-
-        /** @var \React\Promise\FulfilledPromise|\React\Promise\Promise|\React\Promise\RejectedPromise $connection */
-        $connection = $connector->create($this->newServer['host'], $this->newServer['port']);
-        $connection->then(function(Stream $memcachedStream) {
-            $this->rwMemcachedStream = $memcachedStream;
-        });
-
         $socket = new reactSocketServer($loop);
 
         $socket->on('connection', function (Stream $clientStream) use ($connector) {
+            if(!$this->roMemcachedStream || !$this->roMemcachedStream->isWritable()) {
+                /** @var \React\Promise\FulfilledPromise|\React\Promise\Promise|\React\Promise\RejectedPromise $connection */
+                $connection = $connector->create($this->oldServer['host'], $this->oldServer['port']);
+                $connection->then(function (Stream $memcachedStream){
+                    $this->roMemcachedStream = $memcachedStream;
+                });
+            }
+
+            if(!$this->rwMemcachedStream || !$this->rwMemcachedStream->isWritable()) {
+                /** @var \React\Promise\FulfilledPromise|\React\Promise\Promise|\React\Promise\RejectedPromise $connection */
+                $connection = $connector->create($this->newServer['host'], $this->newServer['port']);
+                $connection->then(function (Stream $memcachedStream){
+                    $this->rwMemcachedStream = $memcachedStream;
+                });
+            }
+
             $clientStream->on('data', function($clientRequestData) use ($clientStream) {
                 if(strpos($clientRequestData, 'get') === 0) {
                     // RO-server (old)
