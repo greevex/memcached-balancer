@@ -264,19 +264,26 @@ class routeServer
             if(!$this->roMemcachedStream || !$this->roMemcachedStream->isWritable()) {
                 /** @var \React\Promise\FulfilledPromise|\React\Promise\Promise|\React\Promise\RejectedPromise $connection */
                 $connection = $connector->create($this->oldServer['host'], $this->oldServer['port']);
-                $connection->then(function (Stream $memcachedStream){
+                $connection->then(function (Stream $memcachedStream) use ($clientStream) {
                     $this->roMemcachedStream = $memcachedStream;
+                    if($this->rwMemcachedStream) {
+                        $clientStream->resume();
+                    }
                 });
             }
 
             if(!$this->rwMemcachedStream || !$this->rwMemcachedStream->isWritable()) {
                 /** @var \React\Promise\FulfilledPromise|\React\Promise\Promise|\React\Promise\RejectedPromise $connection */
                 $connection = $connector->create($this->newServer['host'], $this->newServer['port']);
-                $connection->then(function (Stream $memcachedStream){
+                $connection->then(function (Stream $memcachedStream) use ($clientStream) {
                     $this->rwMemcachedStream = $memcachedStream;
+                    if($this->roMemcachedStream) {
+                        $clientStream->resume();
+                    }
                 });
             }
 
+            $clientStream->pause();
             $clientStream->on('data', function($clientRequestData) use ($clientStream) {
                 if(strpos($clientRequestData, 'get') === 0) {
                     // RO-server (old)
