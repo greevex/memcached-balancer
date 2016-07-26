@@ -64,14 +64,15 @@ class router
         }
 
         if(!is_readable($cfgFile)) {
-            self::log()->addCritical("Unable to find config file [access denied]: {$cfgFile}", [__METHOD__]);
+            self::log()->addCritical("Unable to read config file [access denied]: {$cfgFile}", [__METHOD__]);
             exit(1);
         }
 
         $configStr = file_get_contents($cfgFile);
         $config = json_decode($configStr, true);
         if(!is_array($config)) {
-            self::log()->addCritical("Unable to find config file [access denied]: {$cfgFile}", [__METHOD__]);
+            self::log()->addCritical("Unable to read config file [invalid json]: {$cfgFile}", [__METHOD__]);
+            error_log($configStr);
             exit(1);
         }
 
