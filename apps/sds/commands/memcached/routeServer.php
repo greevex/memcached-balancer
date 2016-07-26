@@ -270,7 +270,7 @@ class routeServer
                 $connection = $connector->create($this->oldServer['host'], $this->oldServer['port']);
                 $connection->then(function (Stream $memcachedStream) use ($clientStream) {
                     $this->roMemcachedStream = $memcachedStream;
-                    if($this->rwMemcachedStream) {
+                    if($this->roMemcachedStream) {
                         $clientStream->resume();
                     }
                 });
@@ -281,7 +281,7 @@ class routeServer
                 $connection = $connector->create($this->newServer['host'], $this->newServer['port']);
                 $connection->then(function (Stream $memcachedStream) use ($clientStream) {
                     $this->rwMemcachedStream = $memcachedStream;
-                    if($this->roMemcachedStream) {
+                    if($this->rwMemcachedStream) {
                         $clientStream->resume();
                     }
                 });
