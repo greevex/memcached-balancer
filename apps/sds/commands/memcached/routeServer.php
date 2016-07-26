@@ -258,33 +258,40 @@ class routeServer
 
         $connector = new Connector($loop, $this->getDns($loop));
 
+        /** @var \React\Promise\FulfilledPromise|\React\Promise\Promise|\React\Promise\RejectedPromise $connection */
+        $connection = $connector->create($this->oldServer['host'], $this->oldServer['port']);
+        $connection->then(function (Stream $memcachedStream) {
+            $this->roMemcachedStream = $memcachedStream;
+        });
+        /** @var \React\Promise\FulfilledPromise|\React\Promise\Promise|\React\Promise\RejectedPromise $connection */
+        $connection = $connector->create($this->newServer['host'], $this->newServer['port']);
+        $connection->then(function (Stream $memcachedStream) {
+            $this->rwMemcachedStream = $memcachedStream;
+        });
+
         $socket = new reactSocketServer($loop);
 
         $socket->on('connection', function (Stream $clientStream) use ($connector) {
             if(!$this->roMemcachedStream || !$this->rwMemcachedStream) {
                 $clientStream->pause();
-            }
 
-            if(!$this->roMemcachedStream) {
-                /** @var \React\Promise\FulfilledPromise|\React\Promise\Promise|\React\Promise\RejectedPromise $connection */
-                $connection = $connector->create($this->oldServer['host'], $this->oldServer['port']);
-                $connection->then(function (Stream $memcachedStream) use ($clientStream) {
-                    $this->roMemcachedStream = $memcachedStream;
-                    if($this->roMemcachedStream) {
+                if(!$this->roMemcachedStream) {
+                    /** @var \React\Promise\FulfilledPromise|\React\Promise\Promise|\React\Promise\RejectedPromise $connection */
+                    $connection = $connector->create($this->oldServer['host'], $this->oldServer['port']);
+                    $connection->then(function (Stream $memcachedStream) use ($clientStream) {
+                        $this->roMemcachedStream = $memcachedStream;
                         $clientStream->resume();
-                    }
-                });
-            }
+                    });
+                }
 
-            if(!$this->rwMemcachedStream) {
-                /** @var \React\Promise\FulfilledPromise|\React\Promise\Promise|\React\Promise\RejectedPromise $connection */
-                $connection = $connector->create($this->newServer['host'], $this->newServer['port']);
-                $connection->then(function (Stream $memcachedStream) use ($clientStream) {
-                    $this->rwMemcachedStream = $memcachedStream;
-                    if($this->rwMemcachedStream) {
+                if(!$this->rwMemcachedStream) {
+                    /** @var \React\Promise\FulfilledPromise|\React\Promise\Promise|\React\Promise\RejectedPromise $connection */
+                    $connection = $connector->create($this->newServer['host'], $this->newServer['port']);
+                    $connection->then(function (Stream $memcachedStream) use ($clientStream) {
+                        $this->rwMemcachedStream = $memcachedStream;
                         $clientStream->resume();
-                    }
-                });
+                    });
+                }
             }
 
             $clientStream->on('data', function($clientRequestData) use ($clientStream) {
