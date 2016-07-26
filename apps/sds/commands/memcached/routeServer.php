@@ -261,6 +261,8 @@ class routeServer
         $socket = new reactSocketServer($loop);
 
         $socket->on('connection', function (Stream $clientStream) use ($connector) {
+            $clientStream->pause();
+
             if(!$this->roMemcachedStream || !$this->roMemcachedStream->isWritable()) {
                 /** @var \React\Promise\FulfilledPromise|\React\Promise\Promise|\React\Promise\RejectedPromise $connection */
                 $connection = $connector->create($this->oldServer['host'], $this->oldServer['port']);
@@ -283,7 +285,6 @@ class routeServer
                 });
             }
 
-            $clientStream->pause();
             $clientStream->on('data', function($clientRequestData) use ($clientStream) {
                 if(strpos($clientRequestData, 'get') === 0) {
                     // RO-server (old)
