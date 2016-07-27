@@ -3,6 +3,7 @@
 namespace mpcmf\apps\sds\commands\memcached;
 
 use mpcmf\system\application\consoleCommandBase;
+use mpcmf\system\helper\service\timer;
 use mpcmf\system\threads\threadPool;
 use Symfony\Component\Console\Input\InputInterface;
 use Symfony\Component\Console\Input\InputOption;
@@ -64,6 +65,9 @@ class checkDataStorage
         $memcached = new \Memcached();
         $memcached->addServer($this->memcachedServer['host'], $this->memcachedServer['port']);
 
+        $timer = new timer();
+        $timer->start();
+
         $keyPrefix = 'someKey:';
 
         for($i = $this->requestsCount; $i > 0; $i--) {
@@ -82,5 +86,9 @@ class checkDataStorage
         }
 
         $output->writeln("Ok: {$ok} / Total: {$this->requestsCount}");
+
+        $timer->stop();
+
+        $output->writeln("Clean time: {$timer->getPeriod()}");
     }
 }
