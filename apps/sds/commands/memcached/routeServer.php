@@ -148,11 +148,16 @@ class routeServer
         ];
     }
 
+    private $masterClients = 0;
+    private $masterRps = 0;
+    private $masterRpsTime = 0;
+    private $masterRpsClients = 0;
+
     public function masterServer($bindMasterTo)
     {
         $output = $this->output;
 
-        MPCMF_DEBUG && $output->writeln('<error>[MASTER]</error> Preparing server');
+        MPCMF_LL_DEBUG && $output->writeln('<error>[MASTER]</error> Preparing server');
 
         $loop = Factory::create();
 
@@ -171,7 +176,10 @@ class routeServer
 
             $clientConnection->pause();
 
-            MPCMF_DEBUG && $clientId = spl_object_hash($clientConnection);
+            $this->masterClients++;
+            $this->masterRpsClients++;
+
+            MPCMF_LL_DEBUG && $clientId = spl_object_hash($clientConnection);
             do {
                 $threadKey = array_rand($this->threads);
                 if($this->threads[$threadKey]->isAlive()) {
@@ -183,11 +191,8 @@ class routeServer
 
             MPCMF_LL_DEBUG && $output->writeln("<error>[MASTER:{$clientId}]</error> Client connected, using port {$childPort}");
 
-
-            $clientConnection->on('end', function() use ($clientConnection, $clientId, $output) {
-                MPCMF_LL_DEBUG && $output->writeln("<error>[MASTER:{$clientId}]</error> Client connection ending");
-            });
             $clientConnection->on('close', function() use ($clientConnection, $clientId, $output) {
+                $this->masterClients--;
                 MPCMF_LL_DEBUG && $output->writeln("<error>[MASTER:{$clientId}]</error> Client connection closed");
             });
 
@@ -219,6 +224,7 @@ class routeServer
                 $childStream->resume();
 
                 $clientConnection->on('data', function ($data) use ($clientConnection, $childConnection, $output, $clientId, $childStream) {
+                    $this->masterRps++;
                     MPCMF_LL_DEBUG && $output->writeln("<error>[MASTER:{$clientId}]</error> Client data received, sending request to child");
 
                     $childStream->write($data);
@@ -233,8 +239,24 @@ class routeServer
         $output->writeln("<error>[MASTER]</error> Starting server on {$bindMasterTo['host']}:{$bindMasterTo['port']}");
         $socketServer->listen($bindMasterTo['port'], $bindMasterTo['host']);
 
-        $loop->addPeriodicTimer(1.0, [$this, 'checkThreads']);
+        $this->masterRps = 0;
+        $this->masterRpsTime = microtime(true);
+
+        $loop->addPeriodicTimer(3.0, [$this, 'writeStatus']);
+        $loop->addPeriodicTimer(5.0, [$this, 'checkThreads']);
         $loop->run();
+    }
+
+    public function writeStatus()
+    {
+        $rpsPeriod = microtime(true) - $this->masterRpsTime;
+        $rps = round($this->masterRps / $rpsPeriod, 2);
+
+        error_log(date('[Y-m-d H:i:s]') . "[STATS] {$rps} rps on {$this->masterRpsClients} clients");
+
+        $this->masterRps = 0;
+        $this->masterRpsTime = microtime(true);
+        $this->masterRpsClients = $this->masterClients;
     }
 
     public function childServer($addr)
