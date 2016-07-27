@@ -249,6 +249,11 @@ class routeServer
 
     public function writeStatus()
     {
+        if($this->masterRps === 0 && $this->masterRpsClients === 0) {
+
+            return;
+        }
+
         $rpsPeriod = microtime(true) - $this->masterRpsTime;
         $rps = round($this->masterRps / $rpsPeriod, 2);
 
