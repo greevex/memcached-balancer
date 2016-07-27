@@ -242,8 +242,8 @@ class routeServer
         $this->masterRps = 0;
         $this->masterRpsTime = microtime(true);
 
-        $loop->addPeriodicTimer(3.0, [$this, 'writeStatus']);
-        $loop->addPeriodicTimer(5.0, [$this, 'checkThreads']);
+        $loop->addPeriodicTimer(5.0, [$this, 'writeStatus']);
+        $loop->addPeriodicTimer(10.0, [$this, 'checkThreads']);
         $loop->run();
     }
 
