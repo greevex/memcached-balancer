@@ -77,12 +77,12 @@ class routeServer
      */
     protected function handle(InputInterface $input, OutputInterface $output)
     {
+        $this->oldServer = $this->parseAddr($input->getOption('old-mc-server'));
+        $this->newServer = $this->parseAddr($input->getOption('new-mc-server'));
+
         $this->output = $output;
         $this->prepareThreads($input);
         $this->checkThreads();
-
-        $this->oldServer = $this->parseAddr($input->getOption('old-mc-server'));
-        $this->newServer = $this->parseAddr($input->getOption('new-mc-server'));
 
         $masterServerAddr = $input->getOption('master-server');
         if($masterServerAddr) {
@@ -148,12 +148,6 @@ class routeServer
         ];
     }
 
-    private function getDns($loop)
-    {
-        $dnsResolverFactory = new reactResolver();
-        return $dnsResolverFactory->createCached('8.8.8.8', $loop);
-    }
-
     public function masterServer($bindMasterTo)
     {
         $output = $this->output;
@@ -162,8 +156,10 @@ class routeServer
 
         $loop = Factory::create();
 
+        $dnsResolverFactory = new reactResolver();
+        $dns = $dnsResolverFactory->createCached('8.8.8.8', $loop);
 
-        $connector = new Connector($loop, $this->getDns($loop));
+        $connector = new Connector($loop, $dns);
 
         $output->writeln('<error>[MASTER]</error> Binding callables and building socketServer');
 
@@ -256,70 +252,113 @@ class routeServer
 
         $loop = Factory::create();
 
-        $connector = new Connector($loop, $this->getDns($loop));
+        $dnsResolverFactory = new reactResolver();
+        $dns = $dnsResolverFactory->createCached('8.8.8.8', $loop);
+
+        $connector = new Connector($loop, $dns);
 
         /** @var \React\Promise\FulfilledPromise|\React\Promise\Promise|\React\Promise\RejectedPromise $connection */
         $connection = $connector->create($this->oldServer['host'], $this->oldServer['port']);
         $connection->then(function (Stream $memcachedStream) {
+            MPCMF_LL_DEBUG && error_log('[!!!] Connected to OLD memcached server: ' . json_encode($this->oldServer));
             $this->roMemcachedStream = $memcachedStream;
         });
         /** @var \React\Promise\FulfilledPromise|\React\Promise\Promise|\React\Promise\RejectedPromise $connection */
         $connection = $connector->create($this->newServer['host'], $this->newServer['port']);
         $connection->then(function (Stream $memcachedStream) {
+            MPCMF_LL_DEBUG && error_log('[!!!] Connected to NEW memcached server: ' . json_encode($this->newServer));
             $this->rwMemcachedStream = $memcachedStream;
         });
 
         $socket = new reactSocketServer($loop);
 
-        $socket->on('connection', function (Stream $clientStream) use ($connector) {
-            if(!$this->roMemcachedStream || !$this->rwMemcachedStream) {
-                $clientStream->pause();
+        $socket->on('connection', function (Stream $clientStream) use ($loop) {
+            if(!$this->roMemcachedStream || get_resource_type($this->roMemcachedStream->getBuffer()->stream) !== 'stream') {
+                $this->roMemcachedStream = new Stream(stream_socket_client("tcp://{$this->oldServer['host']}:{$this->oldServer['port']}"), $loop);
+                MPCMF_LL_DEBUG && error_log('[!!!] INFO: OLD server initialized, resuming client');
+            }
 
-                if(!$this->roMemcachedStream) {
-                    /** @var \React\Promise\FulfilledPromise|\React\Promise\Promise|\React\Promise\RejectedPromise $connection */
-                    $connection = $connector->create($this->oldServer['host'], $this->oldServer['port']);
-                    $connection->then(function (Stream $memcachedStream) use ($clientStream) {
-                        $this->roMemcachedStream = $memcachedStream;
-                        $clientStream->resume();
-                    });
-                }
-
-                if(!$this->rwMemcachedStream) {
-                    /** @var \React\Promise\FulfilledPromise|\React\Promise\Promise|\React\Promise\RejectedPromise $connection */
-                    $connection = $connector->create($this->newServer['host'], $this->newServer['port']);
-                    $connection->then(function (Stream $memcachedStream) use ($clientStream) {
-                        $this->rwMemcachedStream = $memcachedStream;
-                        $clientStream->resume();
-                    });
-                }
+            if(!$this->rwMemcachedStream || get_resource_type($this->rwMemcachedStream->getBuffer()->stream) !== 'stream') {
+                $this->rwMemcachedStream = new Stream(stream_socket_client("tcp://{$this->newServer['host']}:{$this->newServer['port']}"), $loop);
+                MPCMF_LL_DEBUG && error_log('[!!!] INFO: NEW server initialized, resuming client');
             }
 
             $clientStream->on('data', function($clientRequestData) use ($clientStream) {
+
+                if($clientRequestData === "quit\r\n") {
+                    MPCMF_LL_DEBUG && error_log('[CHILD] Client send quit command, disconnecting him...');
+                    $clientStream->close();
+
+                    return;
+                }
+
+                MPCMF_LL_DEBUG && error_log('[CHILD] Router: Master data received');
+
                 if(strpos($clientRequestData, 'get') === 0) {
                     // RO-server (old)
+
+                    MPCMF_LL_DEBUG && error_log('[CHILD] Router: Request is GET, binding on data from OLD memcached');
                     $this->roMemcachedStream->once('data', function($data) use ($clientStream, $clientRequestData) {
+
+                        MPCMF_LL_DEBUG && error_log('[CHILD] Router: [GET] Received response from OLD memcached');
+
                         if(strpos($data, 'END') === 0 && strlen($data) === 5) {
+
+                            MPCMF_LL_DEBUG && error_log('[CHILD] Router: [GET] But response is empty, binding to NEW memcached...');
                             $this->rwMemcachedStream->once('data', function($data) use ($clientStream) {
+                                MPCMF_LL_DEBUG && error_log('[CHILD] Router: [GET] Received response from NEW memcached, sending to master');
                                 $clientStream->write($data);
+                                $clientStream->getBuffer()->handleWrite();
                             });
+
+                            MPCMF_LL_DEBUG && error_log('[CHILD] Router: [GET] And sending response to NEW memcached');
                             $this->rwMemcachedStream->write($clientRequestData);
                         } else {
+
+                            MPCMF_LL_DEBUG && error_log('[CHILD] Router: [GET] Response OK, sending it to master');
                             $clientStream->write($data);
+                            $clientStream->getBuffer()->handleWrite();
                         }
                     });
+
+                    MPCMF_LL_DEBUG && error_log('[CHILD] Router: [GET] Sending request to OLD memcached');
                     $this->roMemcachedStream->write($clientRequestData);
                 } else {
                     // RW-server (new)
+
+                    MPCMF_LL_DEBUG && error_log('[CHILD] Router: Request is WRITE, binding on data from NEW memcached');
                     $this->rwMemcachedStream->once('data', function($data) use ($clientStream) {
+
+                        MPCMF_LL_DEBUG && error_log('[CHILD] Router: [WRITE] Received response from NEW memcached, sending to master');
                         $clientStream->write($data);
+                        $clientStream->getBuffer()->handleWrite();
                     });
+
+                    MPCMF_LL_DEBUG && error_log('[CHILD] Router: [WRITE] Sending request to NEW memcached');
+                    if(MPCMF_LL_DEBUG) {
+                        $this->rwMemcachedStream->getBuffer()->on('drain', function() {
+                            error_log('[CHILD] Router: [WRITE] Buffer chunk-drain OK');
+                        });
+                        $this->rwMemcachedStream->getBuffer()->on('full-drain', function() {
+                            error_log('[CHILD] Router: [WRITE] Buffer full-drain OK');
+                        });
+                    }
+
                     $this->rwMemcachedStream->write($clientRequestData);
+                    $this->rwMemcachedStream->getBuffer()->handleWrite();
                 }
             });
         });
 
         $this->output->writeln("<error>[CHILD]</error> Starting child server on {$this->childHost}:{$this->port}");
         $socket->listen($this->port, $this->childHost);
+
+        if(MPCMF_LL_DEBUG) {
+            $loop->addPeriodicTimer(1.0, function (){
+                error_log('[' . getmypid() . '][' . date('Y-m-d H:i:s') . '][LOOP]Tick...');
+            });
+        }
+
         $loop->run();
     }
 }
